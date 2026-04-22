@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "format": "prettier --write \"src/**/*\"",
-    "check-format": "prettier --check \"src/**/*.ts\""
+    "check-format": "prettier --check \"src/**/*\""
   },
   "dependencies": {
     "@polkadot/api": "^16.5.6",
@@ -25,10 +25,10 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
-    "@vitest/ui": "^4.1.5",
+    "@vitest/ui": "^3.2.4",
     "prettier": "^3.8.3",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
-    "vitest": "^4.1.5"
+    "vitest": "^3.2.4"
   }
 }
