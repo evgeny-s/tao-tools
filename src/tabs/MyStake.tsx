@@ -1,21 +1,21 @@
-import { useState, useRef } from "react";
-import {
-	DEFAULT_RPC,
-	estimateBlockForDate,
-	fetchStakeData,
-	getHeadBlock,
-	type FetchResult,
-	type StatusUpdate,
-} from "../lib/fetcher";
+import { useRef, useState } from "react";
 import BalanceGrid from "../components/BalanceGrid";
 import StatusLog from "../components/StatusLog";
 import Summary from "../components/Summary";
+import {
+	DEFAULT_RPC,
+	type FetchBound,
+	type FetchResult,
+	type StatusUpdate,
+	fetchStakeData,
+} from "../lib/fetcher";
+import { isLikelySs58, isValidWsUrl, parseBlockNumber } from "../lib/utils";
 
 type RangeMode = "block" | "date";
 
 export default function MyStake() {
 	const [rpc, setRpc] = useState(DEFAULT_RPC);
-	const [coldkey, setColdkey] = useState("");
+	const [coldkey, setColdkey] = useState("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh");
 	const [fromMode, setFromMode] = useState<RangeMode>("date");
 	const [toMode, setToMode] = useState<RangeMode>("date");
 	// defaults: last 30 days → now
@@ -31,21 +31,20 @@ export default function MyStake() {
 	const [loading, setLoading] = useState(false);
 	const [statusLog, setStatusLog] = useState<StatusUpdate[]>([]);
 	const [result, setResult] = useState<FetchResult | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const lastProgress = useRef<string>("");
 
-	async function resolveBlock(mode: RangeMode, value: string): Promise<number> {
-		if (mode === "block") return parseInt(value);
+	function parseBound(mode: RangeMode, value: string): FetchBound {
+		if (mode === "block") return parseBlockNumber(value);
 		const d = new Date(value);
-		if (isNaN(d.getTime())) throw new Error(`Invalid date: ${value}`);
-		return await estimateBlockForDate(rpc, d);
+		if (isNaN(d.getTime())) throw new Error(`Invalid date: "${value}"`);
+		return d;
 	}
 
 	function appendStatus(u: StatusUpdate) {
 		setStatusLog((prev) => {
 			// Collapse repeated "progress" lines into a single updating entry.
 			if (u.kind === "progress") {
-				const key = `${u.message}`;
+				const key = u.message;
 				if (
 					lastProgress.current === key &&
 					prev.length > 0 &&
@@ -65,30 +64,24 @@ export default function MyStake() {
 
 	async function onSubmit(e: React.FormEvent) {
 		e.preventDefault();
-		setError(null);
 		setResult(null);
 		setStatusLog([]);
 		setLoading(true);
 		try {
-			appendStatus({ kind: "info", message: "Resolving block range..." });
-			let startBlock = await resolveBlock(fromMode, fromValue);
-			let endBlock =
-				toMode === "date" && toValue === new Date().toISOString().slice(0, 10)
-					? await getHeadBlock(rpc)
-					: await resolveBlock(toMode, toValue);
-			if (startBlock >= endBlock)
-				throw new Error(`Invalid range: start ${startBlock} ≥ end ${endBlock}`);
-			appendStatus({ kind: "info", message: `Range: block ${startBlock} → ${endBlock}` });
+			// Client-side validation — cheap, surfaces mistakes before the WS handshake.
+			if (!isValidWsUrl(rpc)) throw new Error(`RPC must be a ws:// or wss:// URL`);
+			if (!isLikelySs58(coldkey)) throw new Error(`Coldkey doesn't look like a valid SS58 address`);
+
+			const from = parseBound(fromMode, fromValue);
+			const to = parseBound(toMode, toValue);
 			const data = await fetchStakeData(
-				{ rpc, coldkey: coldkey.trim(), startBlock, endBlock, samplesPerDay, concurrency },
+				{ rpc, coldkey: coldkey.trim(), from, to, samplesPerDay, concurrency },
 				appendStatus,
 			);
 			setResult(data);
 		} catch (e: any) {
 			console.error(e);
-			const msg = e?.message || String(e);
-			setError(msg);
-			appendStatus({ kind: "error", message: msg });
+			appendStatus({ kind: "error", message: e?.message || String(e) });
 		} finally {
 			setLoading(false);
 		}
@@ -187,7 +180,7 @@ export default function MyStake() {
 				</button>
 			</form>
 
-			{(statusLog.length > 0 || error) && <StatusLog entries={statusLog} />}
+			{statusLog.length > 0 && <StatusLog entries={statusLog} />}
 
 			{result && (
 				<>

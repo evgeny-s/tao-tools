@@ -42,6 +42,28 @@ export async function withLimit<T, R>(
 	return results;
 }
 
+// Rough SS58 sanity — enough to surface typos client-side before they reach @polkadot.
+// Substrate SS58 addresses are base58 (alphabet below) and land at 47–48 chars for Bittensor.
+const SS58_ALPHABET = /^[1-9A-HJ-NP-Za-km-z]+$/;
+export function isLikelySs58(s: string): boolean {
+	const trimmed = s.trim();
+	if (trimmed.length < 46 || trimmed.length > 50) return false;
+	return SS58_ALPHABET.test(trimmed);
+}
+
+export function isValidWsUrl(s: string): boolean {
+	return /^wss?:\/\/[^\s]+$/i.test(s.trim());
+}
+
+// Parses a user-entered block number; throws with a readable message on garbage input.
+export function parseBlockNumber(value: string): number {
+	const n = Number(value);
+	if (!Number.isFinite(n) || n < 1 || Math.floor(n) !== n) {
+		throw new Error(`Invalid block number: "${value}"`);
+	}
+	return n;
+}
+
 export function decodeIdentity(raw: any): any {
 	if (!raw || raw.isNone) return null;
 	const u = raw.isSome ? raw.unwrap() : raw;

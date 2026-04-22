@@ -5,7 +5,7 @@
 // Ported from WIP/TS_SCRIPTS/src/dividends_anomaly.ts for browser use.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { SHARE_COEF, U64_MAX_N, decodeIdentity, formatTao, withLimit } from "./utils";
+import { U64_MAX_N, decodeIdentity, formatTao, withLimit } from "./utils";
 import {
 	computeBalance,
 	computePassiveDividend,
@@ -15,11 +15,15 @@ import {
 
 export const DEFAULT_RPC = "wss://subtensor-archive.app.minesight.co.uk";
 
+// `from` / `to` accept a block number (pre-resolved) or a Date; the fetcher
+// resolves dates on a single shared API connection — avoids multiple WS handshakes.
+export type FetchBound = number | Date;
+
 export type FetchParams = {
 	rpc: string;
 	coldkey: string;
-	startBlock: number;
-	endBlock: number;
+	from: FetchBound;
+	to: FetchBound;
 	samplesPerDay: number;
 	concurrency: number;
 };
@@ -97,14 +101,28 @@ export async function fetchStakeData(
 	params: FetchParams,
 	onStatus: (s: StatusUpdate) => void,
 ): Promise<FetchResult> {
-	const { rpc, coldkey, startBlock, endBlock, samplesPerDay, concurrency } = params;
+	const { rpc, coldkey, from, to, samplesPerDay, concurrency } = params;
 	const BLOCKS_PER_DAY = 7200;
 	const BLOCKS_PER_SAMPLE = Math.floor(BLOCKS_PER_DAY / samplesPerDay);
-	const TOTAL_SAMPLES = Math.floor((endBlock - startBlock) / BLOCKS_PER_SAMPLE) + 1;
 
 	onStatus({ kind: "info", message: `Connecting to ${rpc}...` });
 	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
 	try {
+		// Resolve date inputs → blocks using head as anchor (single API connection).
+		const head = await api.rpc.chain.getHeader();
+		const headBlock = head.number.toNumber();
+		const nowMs = Date.now();
+		const toBlockFromDate = (d: Date) => {
+			const diffBlocks = Math.floor((nowMs - d.getTime()) / 1000 / 12);
+			return Math.max(1, headBlock - diffBlocks);
+		};
+		const startBlock = typeof from === "number" ? from : toBlockFromDate(from);
+		const endBlock = typeof to === "number" ? to : toBlockFromDate(to);
+		if (startBlock >= endBlock) {
+			throw new Error(`Invalid range: start ${startBlock} ≥ end ${endBlock}`);
+		}
+		const TOTAL_SAMPLES = Math.floor((endBlock - startBlock) / BLOCKS_PER_SAMPLE) + 1;
+
 		const startHash = (await api.rpc.chain.getBlockHash(startBlock)).toHex();
 		const endHash = (await api.rpc.chain.getBlockHash(endBlock)).toHex();
 		const apiStart = await api.at(startHash);
@@ -413,48 +431,55 @@ export async function fetchStakeData(
 			let eventType = "unknown";
 			let taoHuman: string | undefined;
 			let alphaHuman: string | undefined;
+			// Event schemas (keep in sync with pallets/subtensor/src/macros/events.rs):
+			//   StakeAdded      (coldkey, hotkey, tao, alpha, netuid, fee)                        — 6 fields
+			//   StakeRemoved    (coldkey, hotkey, tao, alpha, netuid, fee)                        — 6 fields
+			//   StakeMoved      (coldkey, fromHotkey, fromNetuid, toHotkey, toNetuid, tao)        — 6 fields
+			//   StakeTransferred(fromCold, toCold,  hotkey,      fromNetuid, toNetuid, tao)       — 6 fields
+			//   StakeSwapped    (coldkey, hotkey,   fromNetuid, toNetuid, tao)                    — 5 fields
+			// If the runtime ever reshapes these, the `hasLen` check leaves eventType=unknown
+			// rather than matching on wrong indices.
+			const hasLen = (d: any[], n: number) => Array.isArray(d) && d.length >= n;
+			const bi = (v: any): bigint => (typeof v === "string" ? BigInt(v) : BigInt(v ?? 0));
+
 			for (const e of events) {
 				const d = e.data;
 				if (e.method === "StakeAdded" || e.method === "StakeRemoved") {
+					if (!hasLen(d, 5)) continue;
 					if (d[0] === coldkey && d[1] === pos.hotkey && Number(d[4]) === pos.netuid) {
 						eventType = e.method;
-						const taoRao = typeof d[2] === "string" ? BigInt(d[2]) : BigInt(d[2] ?? 0);
-						const alphaRao = typeof d[3] === "string" ? BigInt(d[3]) : BigInt(d[3] ?? 0);
-						taoHuman = formatTao(taoRao);
-						alphaHuman = formatTao(alphaRao);
+						taoHuman = formatTao(bi(d[2]));
+						alphaHuman = formatTao(bi(d[3]));
 						break;
 					}
-				}
-				if (e.method === "StakeMoved") {
+				} else if (e.method === "StakeMoved") {
+					if (!hasLen(d, 6)) continue;
 					if (d[0] !== coldkey) continue;
 					const isOut = d[1] === pos.hotkey && Number(d[2]) === pos.netuid;
 					const isIn = d[3] === pos.hotkey && Number(d[4]) === pos.netuid;
 					if (isOut || isIn) {
 						eventType = isOut ? "StakeMoved(out)" : "StakeMoved(in)";
-						const taoRao = typeof d[5] === "string" ? BigInt(d[5]) : BigInt(d[5] ?? 0);
-						taoHuman = formatTao(taoRao);
+						taoHuman = formatTao(bi(d[5]));
 						break;
 					}
-				}
-				if (e.method === "StakeTransferred") {
+				} else if (e.method === "StakeTransferred") {
+					if (!hasLen(d, 6)) continue;
 					if (d[0] !== coldkey && d[1] !== coldkey) continue;
 					const isOut = d[0] === coldkey && d[2] === pos.hotkey && Number(d[3]) === pos.netuid;
 					const isIn = d[1] === coldkey && d[2] === pos.hotkey && Number(d[4]) === pos.netuid;
 					if (isOut || isIn) {
 						eventType = isOut ? "StakeTransferred(out)" : "StakeTransferred(in)";
-						const taoRao = typeof d[5] === "string" ? BigInt(d[5]) : BigInt(d[5] ?? 0);
-						taoHuman = formatTao(taoRao);
+						taoHuman = formatTao(bi(d[5]));
 						break;
 					}
-				}
-				if (e.method === "StakeSwapped") {
+				} else if (e.method === "StakeSwapped") {
+					if (!hasLen(d, 5)) continue;
 					if (d[0] !== coldkey || d[1] !== pos.hotkey) continue;
 					const isOut = Number(d[2]) === pos.netuid;
 					const isIn = Number(d[3]) === pos.netuid;
 					if (isOut || isIn) {
 						eventType = isOut ? "StakeSwapped(out)" : "StakeSwapped(in)";
-						const taoRao = typeof d[4] === "string" ? BigInt(d[4]) : BigInt(d[4] ?? 0);
-						taoHuman = formatTao(taoRao);
+						taoHuman = formatTao(bi(d[4]));
 						break;
 					}
 				}
@@ -560,31 +585,5 @@ export async function fetchStakeData(
 			await api.disconnect();
 		} catch {}
 		throw e;
-	}
-}
-
-// Convert a Date to an estimated block number using current head as anchor (12s block time).
-export async function estimateBlockForDate(rpc: string, date: Date): Promise<number> {
-	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
-	try {
-		const header = await api.rpc.chain.getHeader();
-		const headBlock = header.number.toNumber();
-		const nowMs = Date.now();
-		const targetMs = date.getTime();
-		const diffSec = Math.floor((nowMs - targetMs) / 1000);
-		const diffBlocks = Math.floor(diffSec / 12);
-		return Math.max(1, headBlock - diffBlocks);
-	} finally {
-		await api.disconnect();
-	}
-}
-
-export async function getHeadBlock(rpc: string): Promise<number> {
-	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
-	try {
-		const header = await api.rpc.chain.getHeader();
-		return header.number.toNumber();
-	} finally {
-		await api.disconnect();
 	}
 }

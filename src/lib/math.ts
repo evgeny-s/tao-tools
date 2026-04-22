@@ -18,6 +18,12 @@ export function computeBalance(alpha: bigint, totalShares: bigint, totalAlpha: b
 
 // Pool APY from PSV growth, annualized.
 // Returns null if start PSV is undefined; -100 if pool was fully drained.
+//
+// Precision: keeps totalAlpha / totalShares math in bigint (which can exceed 2^53),
+// doing Number() conversion only after the division has normalized the magnitude.
+// psvRatio = (psvEnd − psvStart) / psvStart
+//          = (totalAlphaEnd × totalSharesStart − totalAlphaStart × totalSharesEnd)
+//            ÷ (totalAlphaStart × totalSharesEnd)
 export function computePoolApyPct(
 	startTotalAlpha: bigint,
 	startTotalShares: bigint,
@@ -26,10 +32,16 @@ export function computePoolApyPct(
 	days: number,
 ): number | null {
 	if (startTotalShares === 0n || days <= 0) return null;
-	const psvStart = (Number(startTotalAlpha) * 1e18) / Number(startTotalShares);
-	const psvEnd = endTotalShares > 0n ? (Number(endTotalAlpha) * 1e18) / Number(endTotalShares) : 0;
-	if (psvStart === 0) return null;
-	const psvRatio = psvEnd / psvStart - 1;
+	if (startTotalAlpha === 0n || endTotalShares === 0n) return null;
+
+	// Scale numerator for float-safe precision after bigint division.
+	const SCALE = 1_000_000_000_000n; // 1e12
+	const numerator = endTotalAlpha * startTotalShares - startTotalAlpha * endTotalShares;
+	const denominator = startTotalAlpha * endTotalShares;
+	if (denominator === 0n) return null;
+
+	const psvRatioScaled = (numerator * SCALE) / denominator;
+	const psvRatio = Number(psvRatioScaled) / Number(SCALE);
 	if (1 + psvRatio <= 0) return -100;
 	return (Math.pow(1 + psvRatio, 365 / days) - 1) * 100;
 }

@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { decodeIdentity, formatTao, withLimit } from "./utils";
+import {
+	decodeIdentity,
+	formatTao,
+	isLikelySs58,
+	isValidWsUrl,
+	parseBlockNumber,
+	withLimit,
+} from "./utils";
 
 describe("formatTao", () => {
 	it("formats zero", () => {
@@ -82,6 +89,58 @@ describe("withLimit", () => {
 	it("handles limit > items.length", async () => {
 		const result = await withLimit([1, 2], 100, async (x) => x + 10);
 		expect(result).toEqual([11, 12]);
+	});
+});
+
+describe("isLikelySs58", () => {
+	it("accepts valid 48-char Substrate address", () => {
+		expect(isLikelySs58("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh")).toBe(true);
+	});
+
+	it("rejects empty / short / too long", () => {
+		expect(isLikelySs58("")).toBe(false);
+		expect(isLikelySs58("5Gb6x")).toBe(false);
+		expect(isLikelySs58("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh_extra_padding")).toBe(
+			false,
+		);
+	});
+
+	it("rejects characters outside base58 alphabet", () => {
+		expect(isLikelySs58("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPW00O0")).toBe(false); // 0, O
+		expect(isLikelySs58("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPW0IlI")).toBe(false); // I, l
+	});
+
+	it("trims whitespace before checking", () => {
+		expect(isLikelySs58("  5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh  ")).toBe(true);
+	});
+});
+
+describe("isValidWsUrl", () => {
+	it("accepts ws:// and wss://", () => {
+		expect(isValidWsUrl("ws://localhost:9944")).toBe(true);
+		expect(isValidWsUrl("wss://subtensor-archive.app.minesight.co.uk")).toBe(true);
+	});
+
+	it("rejects http/https/empty", () => {
+		expect(isValidWsUrl("")).toBe(false);
+		expect(isValidWsUrl("http://example.com")).toBe(false);
+		expect(isValidWsUrl("https://example.com")).toBe(false);
+		expect(isValidWsUrl("subtensor-archive.app")).toBe(false);
+	});
+});
+
+describe("parseBlockNumber", () => {
+	it("parses valid positive integer", () => {
+		expect(parseBlockNumber("7800000")).toBe(7800000);
+		expect(parseBlockNumber("1")).toBe(1);
+	});
+
+	it("throws on garbage", () => {
+		expect(() => parseBlockNumber("")).toThrow(/Invalid block number/);
+		expect(() => parseBlockNumber("abc")).toThrow(/Invalid block number/);
+		expect(() => parseBlockNumber("12.5")).toThrow(/Invalid block number/);
+		expect(() => parseBlockNumber("0")).toThrow(/Invalid block number/);
+		expect(() => parseBlockNumber("-5")).toThrow(/Invalid block number/);
 	});
 });
 

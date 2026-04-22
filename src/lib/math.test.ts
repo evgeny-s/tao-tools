@@ -87,6 +87,20 @@ describe("computePoolApyPct", () => {
 		const apy = computePoolApyPct(1_000_000_000n, 1n * SHARE_COEF, 0n, 1n * SHARE_COEF, 30);
 		expect(apy).toBe(-100);
 	});
+
+	// Large-pool regression: totalAlpha exceeding Number.MAX_SAFE_INTEGER (~9e15).
+	// Old float-based code lost precision here and produced drifted APYs.
+	it("handles totalAlpha > 2^53 without precision loss", () => {
+		// 1e18 rao = 1,000,000,000 α — far above 2^53 (≈ 9.007e15)
+		const startAlpha = 1_000_000_000_000_000_000n; // 1e18
+		const endAlpha = 1_030_000_000_000_000_000n; // 1.03e18 → +3% in 30 days
+		const shares = SHARE_COEF * 1_000_000n; // huge shares pool too
+		const apy = computePoolApyPct(startAlpha, shares, endAlpha, shares, 30);
+		expect(apy).not.toBeNull();
+		// (1.03)^(365/30) − 1 = ~44.2%
+		expect(apy!).toBeGreaterThan(43);
+		expect(apy!).toBeLessThan(46);
+	});
 });
 
 describe("computePassiveDividend", () => {
