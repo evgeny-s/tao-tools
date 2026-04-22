@@ -29,3 +29,20 @@ On submit: connects, probes positions, samples balance/PSV at each point, runs b
 npm run build       # dist/ ready for static hosting
 npm run preview     # preview production build
 ```
+
+Vite reads `BASE_PATH` from the environment. Defaults to `/` locally. The deploy workflow hardcodes `/tao-tools/` for the GitHub Pages project site.
+
+## CI / deploy
+
+Two workflows in `.github/workflows/`:
+
+- **`check-build.yml`** — runs on every push and PR: prettier check → vitest → vite build (which also runs `tsc -b`).
+- **`deploy.yml`** — runs on push to `main` (and manual `workflow_dispatch`): builds with `BASE_PATH=/tao-tools/` and publishes `dist/` via GitHub Pages.
+
+Node.js version is pinned by `.nvmrc` (currently 22).
+
+### One-time setup after first push
+
+1. Go to repo **Settings → Pages**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+3. Push to `main` (or trigger the deploy workflow manually) — the app will be live at `https://evgeny-s.github.io/tao-tools/`.

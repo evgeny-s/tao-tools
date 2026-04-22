@@ -15,7 +15,7 @@ type RangeMode = "block" | "date";
 
 export default function MyStake() {
 	const [rpc, setRpc] = useState(DEFAULT_RPC);
-	const [coldkey, setColdkey] = useState("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh");
+	const [coldkey, setColdkey] = useState("");
 	const [fromMode, setFromMode] = useState<RangeMode>("date");
 	const [toMode, setToMode] = useState<RangeMode>("date");
 	// defaults: last 30 days → now
