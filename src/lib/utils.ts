@@ -1,11 +1,18 @@
 // Shared constants + pure helpers. Extracted from fetcher.ts for testability.
 
-// Subtensor share pool uses SafeFloat-style "bits" scaled by 1e18.
+// Internal precision constant used in bigint share-balance math; chosen to be
+// large enough that `(alpha * SHARE_COEF) / totalShares` keeps useful digits.
 export const SHARE_COEF = 1_000_000_000_000_000_000n;
 // TAO / alpha token use 9 decimals (1 α = 1e9 rao).
 export const TAO_BASE = 1_000_000_000n;
 // u64::MAX — used as "1.0" scale for child-key proportions.
 export const U64_MAX_N = 18_446_744_073_709_551_615n;
+// Legacy Alpha / TotalHotkeyShares stored substrate-fixed U64F64 values, where
+// `bits` is the integer encoding and real_value = bits / 2^64. We keep every
+// share-quantity bigint in this "× 2^64" representation so existing math
+// (which relies on alpha and totalShares cancelling units) needs no changes —
+// V2 (SafeFloat) values are scaled into the same representation on read.
+const TWO_64 = 1n << 64n;
 
 export function formatTao(v: bigint, precision = 6): string {
 	const neg = v < 0n;
@@ -62,6 +69,46 @@ export function parseBlockNumber(value: string): number {
 		throw new Error(`Invalid block number: "${value}"`);
 	}
 	return n;
+}
+
+// Subtensor PR #2353 introduced AlphaV2 / TotalHotkeySharesV2 storing SafeFloat
+// (mantissa × 10^exponent) values, with a *lazy*, *unsynced* per-key migration
+// from the legacy U64F64 maps. Clients reading the storage directly must check
+// both versions and use whichever holds a non-zero value. We normalize V2 into
+// the same "× 2^64" representation as V1 so downstream math is version-blind.
+//
+// Returns 0n if `safeFloat` is missing/malformed (e.g. V2 storage absent on a
+// pre-upgrade block's metadata).
+export function safeFloatToScaledBits(safeFloat: any): bigint {
+	if (!safeFloat) return 0n;
+	try {
+		const mantissa = BigInt(safeFloat.mantissa.toString());
+		if (mantissa === 0n) return 0n;
+		const exponent = Number(safeFloat.exponent.toString());
+		const scaled = mantissa * TWO_64;
+		if (exponent >= 0) return scaled * 10n ** BigInt(exponent);
+		return scaled / 10n ** BigInt(-exponent);
+	} catch {
+		return 0n;
+	}
+}
+
+function legacySharesToScaledBits(legacy: any): bigint {
+	if (!legacy) return 0n;
+	try {
+		return legacy.bits.toBigInt() as bigint;
+	} catch {
+		return 0n;
+	}
+}
+
+// Reads a share-quantity from both legacy (U64F64) and V2 (SafeFloat) storage
+// query results, preferring the V2 value when it is non-zero. Matches the
+// runtime-side merge semantics in `Pallet::alpha_iter_prefix` (PR #2353).
+export function mergeShares(legacyV1: any, safeFloatV2: any): bigint {
+	const v2 = safeFloatToScaledBits(safeFloatV2);
+	if (v2 !== 0n) return v2;
+	return legacySharesToScaledBits(legacyV1);
 }
 
 export function decodeIdentity(raw: any): any {

@@ -5,7 +5,7 @@
 // Ported from WIP/TS_SCRIPTS/src/dividends_anomaly.ts for browser use.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { U64_MAX_N, decodeIdentity, formatTao, withLimit } from "./utils";
+import { U64_MAX_N, decodeIdentity, formatTao, mergeShares, withLimit } from "./utils";
 import {
 	computeBalance,
 	computePassiveDividend,
@@ -14,6 +14,30 @@ import {
 } from "./math";
 
 export const DEFAULT_RPC = "wss://subtensor-archive.app.minesight.co.uk";
+
+// Subtensor PR #2353 introduced AlphaV2 / TotalHotkeySharesV2 alongside the
+// legacy maps; migration is lazy so we must read both and merge. Pre-upgrade
+// blocks have no V2 storage in metadata — these helpers gate the V2 read.
+function fetchAlphaPair(
+	apiAt: any,
+	hotkey: string,
+	coldkey: string,
+	netuid: number,
+): Promise<[any, any]> {
+	const v1 = apiAt.query.subtensorModule.alpha(hotkey, coldkey, netuid);
+	const v2 = apiAt.query.subtensorModule.alphaV2
+		? apiAt.query.subtensorModule.alphaV2(hotkey, coldkey, netuid)
+		: Promise.resolve(null);
+	return Promise.all([v1, v2]) as Promise<[any, any]>;
+}
+
+function fetchSharesPair(apiAt: any, hotkey: string, netuid: number): Promise<[any, any]> {
+	const v1 = apiAt.query.subtensorModule.totalHotkeyShares(hotkey, netuid);
+	const v2 = apiAt.query.subtensorModule.totalHotkeySharesV2
+		? apiAt.query.subtensorModule.totalHotkeySharesV2(hotkey, netuid)
+		: Promise.resolve(null);
+	return Promise.all([v1, v2]) as Promise<[any, any]>;
+}
 
 // `from` / `to` accept a block number (pre-resolved) or a Date; the fetcher
 // resolves dates on a single shared API connection — avoids multiple WS handshakes.
@@ -161,12 +185,12 @@ export async function fetchStakeData(
 			probes,
 			concurrency,
 			async (p) => {
-				const [aStart, aEnd] = await Promise.all([
-					apiStart.query.subtensorModule.alpha(p.hotkey, coldkey, p.netuid),
-					apiEnd.query.subtensorModule.alpha(p.hotkey, coldkey, p.netuid),
+				const [[aStartV1, aStartV2], [aEndV1, aEndV2]] = await Promise.all([
+					fetchAlphaPair(apiStart, p.hotkey, coldkey, p.netuid),
+					fetchAlphaPair(apiEnd, p.hotkey, coldkey, p.netuid),
 				]);
-				const bs = (aStart as any).bits.toBigInt() as bigint;
-				const be = (aEnd as any).bits.toBigInt() as bigint;
+				const bs = mergeShares(aStartV1, aStartV2);
+				const be = mergeShares(aEndV1, aEndV2);
 				if (bs > 0n || be > 0n) positionsSet.add(`${p.hotkey}|${p.netuid}`);
 			},
 			(d, t) => onStatus({ kind: "progress", message: `probing`, done: d, total: t }),
@@ -302,14 +326,14 @@ export async function fetchStakeData(
 			async (job) => {
 				const pos = positions[job.posIdx];
 				const apiAt = sampleApis[job.sampleIdx];
-				const [alphaVal, tsVal, taVal, pkVal] = await Promise.all([
-					apiAt.query.subtensorModule.alpha(pos.hotkey, coldkey, pos.netuid),
-					apiAt.query.subtensorModule.totalHotkeyShares(pos.hotkey, pos.netuid),
+				const [[alphaV1, alphaV2], [tsV1, tsV2], taVal, pkVal] = await Promise.all([
+					fetchAlphaPair(apiAt, pos.hotkey, coldkey, pos.netuid),
+					fetchSharesPair(apiAt, pos.hotkey, pos.netuid),
 					apiAt.query.subtensorModule.totalHotkeyAlpha(pos.hotkey, pos.netuid),
 					apiAt.query.subtensorModule.parentKeys(pos.hotkey, pos.netuid),
 				]);
-				const alpha = (alphaVal as any).bits.toBigInt() as bigint;
-				const totalShares = (tsVal as any).bits.toBigInt() as bigint;
+				const alpha = mergeShares(alphaV1, alphaV2);
+				const totalShares = mergeShares(tsV1, tsV2);
 				const totalAlpha = (taVal as any).toBigInt() as bigint;
 				const balance = computeBalance(alpha, totalShares, totalAlpha);
 				const rawParents = (pkVal as any).toJSON() as Array<[string | number, string]> | null;
@@ -380,9 +404,8 @@ export async function fetchStakeData(
 					const mid = Math.floor((lo + hi) / 2);
 					const hash = (await api.rpc.chain.getBlockHash(mid)).toHex();
 					const apiAt = await api.at(hash);
-					const a = (
-						(await apiAt.query.subtensorModule.alpha(c.hotkey, coldkey, c.netuid)) as any
-					).bits.toBigInt() as bigint;
+					const [aV1, aV2] = await fetchAlphaPair(apiAt, c.hotkey, coldkey, c.netuid);
+					const a = mergeShares(aV1, aV2);
 					if (a === c.toAlpha) hi = mid;
 					else lo = mid;
 				}
