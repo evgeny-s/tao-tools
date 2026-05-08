@@ -1,34 +1,32 @@
 import { useRef, useState } from "react";
-import BalanceGrid from "../components/BalanceGrid";
+import EmissionsTimeline from "../components/EmissionsTimeline";
 import StatusLog from "../components/StatusLog";
-import Summary from "../components/Summary";
 import {
-	type FetchBound,
-	type FetchResult,
-	type StatusUpdate,
-	fetchStakeData,
-} from "../lib/fetcher";
-import { isLikelySs58, isValidWsUrl, parseBlockNumber } from "../lib/utils";
+	type EmissionsResult,
+	alphaAsNumber,
+	fetchEmissionEvents,
+} from "../lib/emissionsFetcher";
+import type { FetchBound, StatusUpdate } from "../lib/fetcher";
+import { isValidWsUrl, parseBlockNumber } from "../lib/utils";
 
 type RangeMode = "block" | "date";
 
-export default function MyStake({ rpc }: { rpc: string }) {
-	const [coldkey, setColdkey] = useState("5Gb6x9SZQULGmFdFnx62GFH24WdcUQseo9pxiWpFwBPWqvyh");
+export default function MinerEmissions({ rpc }: { rpc: string }) {
+	const [netuidStr, setNetuidStr] = useState(""); // empty = all
 	const [fromMode, setFromMode] = useState<RangeMode>("date");
 	const [toMode, setToMode] = useState<RangeMode>("date");
-	// defaults: last 30 days → now
+	// Default window: last 5 hours → now.
 	const [fromValue, setFromValue] = useState(() => {
 		const d = new Date();
-		d.setDate(d.getDate() - 30);
-		return d.toISOString().slice(0, 10);
+		d.setHours(d.getHours() - 5);
+		return d.toISOString().slice(0, 16); // yyyy-MM-ddTHH:mm
 	});
-	const [toValue, setToValue] = useState(() => new Date().toISOString().slice(0, 10));
-	const [samplesPerDay, setSamplesPerDay] = useState(10);
-	const [concurrency, setConcurrency] = useState(10);
+	const [toValue, setToValue] = useState(() => new Date().toISOString().slice(0, 16));
+	const [concurrency, setConcurrency] = useState(20);
 
 	const [loading, setLoading] = useState(false);
 	const [statusLog, setStatusLog] = useState<StatusUpdate[]>([]);
-	const [result, setResult] = useState<FetchResult | null>(null);
+	const [result, setResult] = useState<EmissionsResult | null>(null);
 	const lastProgress = useRef<string>("");
 
 	function parseBound(mode: RangeMode, value: string): FetchBound {
@@ -40,7 +38,6 @@ export default function MyStake({ rpc }: { rpc: string }) {
 
 	function appendStatus(u: StatusUpdate) {
 		setStatusLog((prev) => {
-			// Collapse repeated "progress" lines into a single updating entry.
 			if (u.kind === "progress") {
 				const key = u.message;
 				if (
@@ -66,14 +63,20 @@ export default function MyStake({ rpc }: { rpc: string }) {
 		setStatusLog([]);
 		setLoading(true);
 		try {
-			// Client-side validation — cheap, surfaces mistakes before the WS handshake.
 			if (!isValidWsUrl(rpc)) throw new Error(`RPC must be a ws:// or wss:// URL`);
-			if (!isLikelySs58(coldkey)) throw new Error(`Coldkey doesn't look like a valid SS58 address`);
+
+			let netuidFilter: number | null = null;
+			if (netuidStr.trim() !== "") {
+				const n = Number(netuidStr.trim());
+				if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n)
+					throw new Error(`Invalid netuid: "${netuidStr}"`);
+				netuidFilter = n;
+			}
 
 			const from = parseBound(fromMode, fromValue);
 			const to = parseBound(toMode, toValue);
-			const data = await fetchStakeData(
-				{ rpc, coldkey: coldkey.trim(), from, to, samplesPerDay, concurrency },
+			const data = await fetchEmissionEvents(
+				{ rpc, netuidFilter, from, to, concurrency },
 				appendStatus,
 			);
 			setResult(data);
@@ -89,11 +92,11 @@ export default function MyStake({ rpc }: { rpc: string }) {
 		<div>
 			<form className="form" onSubmit={onSubmit}>
 				<div className="row span-2">
-					<label>Coldkey</label>
+					<label>Netuid (optional — blank = all subnets)</label>
 					<input
-						value={coldkey}
-						onChange={(e) => setColdkey(e.target.value)}
-						placeholder="5Gb6x..."
+						value={netuidStr}
+						onChange={(e) => setNetuidStr(e.target.value)}
+						placeholder="e.g. 64"
 						disabled={loading}
 					/>
 				</div>
@@ -109,7 +112,7 @@ export default function MyStake({ rpc }: { rpc: string }) {
 							<option value="block">block</option>
 						</select>
 						<input
-							type={fromMode === "date" ? "date" : "number"}
+							type={fromMode === "date" ? "datetime-local" : "number"}
 							value={fromValue}
 							onChange={(e) => setFromValue(e.target.value)}
 							disabled={loading}
@@ -128,23 +131,12 @@ export default function MyStake({ rpc }: { rpc: string }) {
 							<option value="block">block</option>
 						</select>
 						<input
-							type={toMode === "date" ? "date" : "number"}
+							type={toMode === "date" ? "datetime-local" : "number"}
 							value={toValue}
 							onChange={(e) => setToValue(e.target.value)}
 							disabled={loading}
 						/>
 					</div>
-				</div>
-				<div className="row">
-					<label>Samples per day</label>
-					<input
-						type="number"
-						min={1}
-						max={100}
-						value={samplesPerDay}
-						onChange={(e) => setSamplesPerDay(parseInt(e.target.value) || 10)}
-						disabled={loading}
-					/>
 				</div>
 				<div className="row">
 					<label>Concurrency</label>
@@ -153,18 +145,25 @@ export default function MyStake({ rpc }: { rpc: string }) {
 						min={1}
 						max={200}
 						value={concurrency}
-						onChange={(e) => setConcurrency(parseInt(e.target.value) || 10)}
+						onChange={(e) => setConcurrency(parseInt(e.target.value) || 20)}
 						disabled={loading}
 					/>
 				</div>
-				<button type="submit" className="submit" disabled={loading || !coldkey.trim()}>
+				<div className="row">
+					<label>&nbsp;</label>
+					<div style={{ fontSize: 11, color: "#666", lineHeight: 1.5 }}>
+						Scans every block in the window for IncentiveAlphaEmittedToMiners events.
+						<br />1 hour ≈ 300 blocks. Larger windows take proportionally longer.
+					</div>
+				</div>
+				<button type="submit" className="submit" disabled={loading}>
 					{loading ? (
 						<>
 							<span className="spinner" />
-							Fetching...
+							Scanning...
 						</>
 					) : (
-						"Fetch"
+						"Fetch emissions"
 					)}
 				</button>
 			</form>
@@ -173,13 +172,38 @@ export default function MyStake({ rpc }: { rpc: string }) {
 
 			{result && (
 				<>
-					<Summary result={result} />
-					<h2>User balance (α) per position — own Y scale, stake-op markers overlaid</h2>
-					<div className="note">
-						Green dashed line = StakeAdded/Moved(in); red dashed line = StakeRemoved/Moved(out).
-						Click block number below each chart to open polkadot.js explorer.
+					<div className="summary">
+						<div className="row">
+							<div>
+								<span className="k">blocks:</span>
+								<span className="v">
+									{result.meta.startBlock} → {result.meta.endBlock} ({result.meta.blocksScanned})
+								</span>
+							</div>
+							<div>
+								<span className="k">subnets:</span>
+								<span className="v">{result.netuids.length}</span>
+							</div>
+							<div>
+								<span className="k">events:</span>
+								<span className="v">{result.totalEvents}</span>
+							</div>
+							<div>
+								<span className="k">total α emitted:</span>
+								<span className="v">{alphaAsNumber(result.totalAlpha).toFixed(4)} α</span>
+							</div>
+						</div>
 					</div>
-					<BalanceGrid result={result} />
+					<h2>
+						Miner incentive emissions per subnet — timeline of IncentiveAlphaEmittedToMiners events
+					</h2>
+					<div className="note">
+						Each bar = one end-of-epoch event (left axis, α emitted). Yellow line = blocks
+						since previous event for the same subnet (right axis) — anomalies (skipped epochs,
+						tempo changes) show up as line spikes. Hover a bar to see per-miner shares; bottom
+						list = top miners by total α received in the window.
+					</div>
+					<EmissionsTimeline result={result} />
 				</>
 			)}
 		</div>
