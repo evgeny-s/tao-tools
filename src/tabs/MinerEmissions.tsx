@@ -1,11 +1,7 @@
 import { useRef, useState } from "react";
 import EmissionsTimeline from "../components/EmissionsTimeline";
 import StatusLog from "../components/StatusLog";
-import {
-	type EmissionsResult,
-	alphaAsNumber,
-	fetchEmissionEvents,
-} from "../lib/emissionsFetcher";
+import { type EmissionsResult, alphaAsNumber, fetchEmissionEvents } from "../lib/emissionsFetcher";
 import type { FetchBound, StatusUpdate } from "../lib/fetcher";
 import { isValidWsUrl, parseBlockNumber } from "../lib/utils";
 
@@ -198,10 +194,10 @@ export default function MinerEmissions({ rpc }: { rpc: string }) {
 						Miner incentive emissions per subnet — timeline of IncentiveAlphaEmittedToMiners events
 					</h2>
 					<div className="note">
-						Each bar = one end-of-epoch event (left axis, α emitted). Yellow line = blocks
-						since previous event for the same subnet (right axis) — anomalies (skipped epochs,
-						tempo changes) show up as line spikes. Hover a bar to see per-miner shares; bottom
-						list = top miners by total α received in the window.
+						Each bar = one end-of-epoch event (left axis, α emitted). Yellow line = blocks since
+						previous event for the same subnet (right axis) — anomalies (skipped epochs, tempo
+						changes) show up as line spikes. Hover a bar to see per-miner shares; bottom list = top
+						miners by total α received in the window.
 					</div>
 					<EmissionsTimeline result={result} />
 				</>
