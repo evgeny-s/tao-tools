@@ -33,9 +33,63 @@ body {
 	padding: 20px;
 }
 
-h1 {
-	font-size: 20px;
-	margin: 0 0 4px 0;
+.topbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-bottom: 4px;
+}
+.rpc-control {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.rpc-control-label {
+	font-size: 11px;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+.rpc-control-input {
+	background: var(--panel-2);
+	color: var(--fg);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-size: 12px;
+	font-family: ui-monospace, monospace;
+	width: 360px;
+	max-width: 50vw;
+}
+.rpc-control-input:focus {
+	outline: 1px solid var(--accent);
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	line-height: 1;
+}
+.brand-mark {
+	height: 22px;
+	width: auto;
+	display: block;
+}
+.brand-text {
+	fill: var(--fg);
+}
+.brand-accent {
+	fill: #aa7bff;
+}
+.brand-suffix {
+	font-size: 16px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	color: var(--muted);
+	line-height: 1;
 }
 h2 {
 	font-size: 14px;
