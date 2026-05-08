@@ -14,8 +14,6 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { withLimit } from "./utils";
 import type { FetchBound, StatusUpdate } from "./fetcher";
 
-export const DEFAULT_RPC = "wss://subtensor-archive.app.minesight.co.uk";
-
 export type EmissionsParams = {
 	rpc: string;
 	netuidFilter: number | null; // null = all subnets
