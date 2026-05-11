@@ -19,6 +19,7 @@ import {
 	alphaAsNumber,
 	formatAlpha,
 } from "../lib/emissionsFetcher";
+import { localDateTimeInput } from "../lib/utils";
 
 ChartJS.register(
 	BarController,
@@ -56,8 +57,9 @@ function shortHk(hk: string): string {
 }
 
 function fmtTime(ms: number): string {
-	const d = new Date(ms);
-	return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+	// Render in the viewer's local timezone — the inputs are picked in local
+	// time, so the chart should display in the same frame.
+	return localDateTimeInput(new Date(ms)).replace("T", " ");
 }
 
 export default function EmissionsTimeline({ result }: { result: EmissionsResult }) {
@@ -203,8 +205,10 @@ function NetuidCard({ data, colorIdx }: { data: NetuidData; colorIdx: number }) 
 					maxTicksLimit: 8,
 					autoSkip: true,
 					callback: (v: any) => {
-						const d = new Date(Number(v));
-						return d.toISOString().slice(5, 16).replace("T", " ");
+						// Local time, MM-DD HH:mm
+						return localDateTimeInput(new Date(Number(v)))
+							.slice(5)
+							.replace("T", " ");
 					},
 				},
 			},
