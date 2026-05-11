@@ -5,7 +5,15 @@
 // Ported from WIP/TS_SCRIPTS/src/dividends_anomaly.ts for browser use.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { U64_MAX_N, decodeIdentity, formatTao, mergeShares, withLimit } from "./utils";
+import {
+	BLOCKS_PER_DAY,
+	BLOCK_TIME_S,
+	U64_MAX_N,
+	decodeIdentity,
+	formatTao,
+	mergeShares,
+	withLimit,
+} from "./utils";
 import {
 	computeBalance,
 	computePassiveDividend,
@@ -126,24 +134,31 @@ export async function fetchStakeData(
 	onStatus: (s: StatusUpdate) => void,
 ): Promise<FetchResult> {
 	const { rpc, coldkey, from, to, samplesPerDay, concurrency } = params;
-	const BLOCKS_PER_DAY = 7200;
 	const BLOCKS_PER_SAMPLE = Math.floor(BLOCKS_PER_DAY / samplesPerDay);
 
 	onStatus({ kind: "info", message: `Connecting to ${rpc}...` });
 	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
 	try {
-		// Resolve date inputs → blocks using head as anchor (single API connection).
+		// Resolve date inputs → blocks. Anchor on the head block's chain timestamp
+		// (not wall clock): on a fresh local chain wall-clock "now" can be hours
+		// ahead of head, and using Date.now() would push the window past head and
+		// collapse to an empty range.
 		const head = await api.rpc.chain.getHeader();
 		const headBlock = head.number.toNumber();
-		const nowMs = Date.now();
+		const headHash = (await api.rpc.chain.getBlockHash(headBlock)).toHex();
+		const apiHead = await api.at(headHash);
+		const headTsMs = ((await apiHead.query.timestamp.now()) as any).toNumber();
 		const toBlockFromDate = (d: Date) => {
-			const diffBlocks = Math.floor((nowMs - d.getTime()) / 1000 / 12);
-			return Math.max(1, headBlock - diffBlocks);
+			const diffBlocks = Math.floor((headTsMs - d.getTime()) / 1000 / BLOCK_TIME_S);
+			const b = headBlock - diffBlocks;
+			return Math.max(1, Math.min(headBlock, b));
 		};
 		const startBlock = typeof from === "number" ? from : toBlockFromDate(from);
 		const endBlock = typeof to === "number" ? to : toBlockFromDate(to);
 		if (startBlock >= endBlock) {
-			throw new Error(`Invalid range: start ${startBlock} ≥ end ${endBlock}`);
+			throw new Error(
+				`Invalid range: start ${startBlock} ≥ end ${endBlock} (chain head is block ${headBlock}; switch From/To to "block" mode if the chain is too short for the date window)`,
+			);
 		}
 		const TOTAL_SAMPLES = Math.floor((endBlock - startBlock) / BLOCKS_PER_SAMPLE) + 1;
 
@@ -213,7 +228,7 @@ export async function fetchStakeData(
 			sampleBlocks[sampleBlocks.length - 1] = endBlock;
 		onStatus({
 			kind: "info",
-			message: `Sampling ${sampleBlocks.length} points (${samplesPerDay}/day), every ${BLOCKS_PER_SAMPLE} blocks (~${((BLOCKS_PER_SAMPLE * 12) / 60).toFixed(0)}min)`,
+			message: `Sampling ${sampleBlocks.length} points (${samplesPerDay}/day), every ${BLOCKS_PER_SAMPLE} blocks (~${((BLOCKS_PER_SAMPLE * BLOCK_TIME_S) / 60).toFixed(0)}min)`,
 		});
 
 		const sampleHashes = await withLimit(sampleBlocks, concurrency, async (bn) =>

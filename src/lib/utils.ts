@@ -7,6 +7,10 @@ export const SHARE_COEF = 1_000_000_000_000_000_000n;
 export const TAO_BASE = 1_000_000_000n;
 // u64::MAX — used as "1.0" scale for child-key proportions.
 export const U64_MAX_N = 18_446_744_073_709_551_615n;
+// Substrate block time for the subtensor chain. Used to convert wall-clock
+// durations to block counts; kept in one place so the two fetchers can't drift.
+export const BLOCK_TIME_S = 12;
+export const BLOCKS_PER_DAY = (24 * 60 * 60) / BLOCK_TIME_S;
 // Legacy Alpha / TotalHotkeyShares stored substrate-fixed U64F64 values, where
 // `bits` is the integer encoding and real_value = bits / 2^64. We keep every
 // share-quantity bigint in this "× 2^64" representation so existing math
@@ -60,6 +64,24 @@ export function isLikelySs58(s: string): boolean {
 
 export function isValidWsUrl(s: string): boolean {
 	return /^wss?:\/\/[^\s]+$/i.test(s.trim());
+}
+
+// HTML5 `<input type="date">` and `<input type="datetime-local">` round-trip
+// in *local* time. `Date.toISOString()` returns UTC, so naively slicing it
+// loses the user's timezone offset — on UTC+N the round trip silently shifts
+// "now" N hours into the past, which on short test chains can clamp the
+// resolved block range below the head and produce empty windows.
+function toLocalIso(d: Date): string {
+	const tz = d.getTimezoneOffset() * 60_000;
+	return new Date(d.getTime() - tz).toISOString();
+}
+
+export function localDateTimeInput(d: Date): string {
+	return toLocalIso(d).slice(0, 16); // yyyy-MM-ddTHH:mm
+}
+
+export function localDateInput(d: Date): string {
+	return toLocalIso(d).slice(0, 10); // yyyy-MM-dd
 }
 
 // Parses a user-entered block number; throws with a readable message on garbage input.

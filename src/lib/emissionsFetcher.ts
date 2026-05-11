@@ -11,7 +11,7 @@
 // avoid missing any, we walk every block in the window and pull `system.events`.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { withLimit } from "./utils";
+import { BLOCK_TIME_S, withLimit } from "./utils";
 import type { FetchBound, StatusUpdate } from "./fetcher";
 
 export type EmissionsParams = {
@@ -64,7 +64,6 @@ export type EmissionsResult = {
 	totalAlpha: bigint;
 };
 
-const BLOCK_TIME_S = 12;
 const TAO_BASE = 1_000_000_000n;
 
 function alphaToNumber(v: bigint): number {
@@ -98,20 +97,28 @@ export async function fetchEmissionEvents(
 	onStatus({ kind: "info", message: `Connecting to ${rpc}...` });
 	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
 	try {
+		// Anchor date→block conversion on the head block's chain timestamp, not
+		// wall clock — on a fresh local chain head can be hours behind Date.now()
+		// and using wall clock would clamp the window past the chain tip.
 		const head = await api.rpc.chain.getHeader();
 		const headBlock = head.number.toNumber();
-		const nowMs = Date.now();
+		const headHash = (await api.rpc.chain.getBlockHash(headBlock)).toHex();
+		const apiHead = await api.at(headHash);
+		const headTsMs = ((await apiHead.query.timestamp.now()) as any).toNumber();
 
 		const toBlockFromDate = (d: Date) => {
-			const diffBlocks = Math.floor((nowMs - d.getTime()) / 1000 / BLOCK_TIME_S);
-			return Math.max(1, headBlock - diffBlocks);
+			const diffBlocks = Math.floor((headTsMs - d.getTime()) / 1000 / BLOCK_TIME_S);
+			const b = headBlock - diffBlocks;
+			return Math.max(1, Math.min(headBlock, b));
 		};
 		const startBlock = typeof from === "number" ? from : toBlockFromDate(from);
 		const endBlock = typeof to === "number" ? to : toBlockFromDate(to);
 		if (startBlock >= endBlock) {
-			throw new Error(`Invalid range: start ${startBlock} ≥ end ${endBlock}`);
+			throw new Error(
+				`Invalid range: start ${startBlock} ≥ end ${endBlock} (chain head is block ${headBlock}; switch From/To to "block" mode if the chain is too short for the date window)`,
+			);
 		}
-		const blockToMs = (b: number) => nowMs - (headBlock - b) * BLOCK_TIME_S * 1000;
+		const blockToMs = (b: number) => headTsMs - (headBlock - b) * BLOCK_TIME_S * 1000;
 
 		const blocksScanned = endBlock - startBlock + 1;
 		onStatus({

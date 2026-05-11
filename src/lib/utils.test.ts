@@ -4,6 +4,8 @@ import {
 	formatTao,
 	isLikelySs58,
 	isValidWsUrl,
+	localDateInput,
+	localDateTimeInput,
 	mergeShares,
 	parseBlockNumber,
 	safeFloatToScaledBits,
@@ -271,5 +273,45 @@ describe("decodeIdentity", () => {
 			url: { toHuman: () => "https://ok" },
 		};
 		expect(decodeIdentity(raw)).toEqual({ url: "https://ok" });
+	});
+});
+
+// These helpers exist because `<input type="datetime-local">` round-trips in
+// local time but `Date.toISOString()` is UTC — a naive slice silently shifts
+// the value by the local TZ offset, which on short test chains collapses the
+// resolved block range below the head.
+describe("localDateTimeInput", () => {
+	it("round-trips through <input type='datetime-local'> without timezone drift", () => {
+		// Pick a deterministic moment; spoof the local TZ via getTimezoneOffset.
+		const d = new Date("2026-05-08T15:30:00.000Z"); // 15:30 UTC
+		vi.spyOn(d, "getTimezoneOffset").mockReturnValue(-120); // UTC+2 → 17:30 local
+		expect(localDateTimeInput(d)).toBe("2026-05-08T17:30");
+	});
+
+	it("handles negative local offsets (UTC-N)", () => {
+		const d = new Date("2026-05-08T15:30:00.000Z");
+		vi.spyOn(d, "getTimezoneOffset").mockReturnValue(300); // UTC-5 → 10:30 local
+		expect(localDateTimeInput(d)).toBe("2026-05-08T10:30");
+	});
+
+	it("matches toISOString slice when TZ is UTC", () => {
+		const d = new Date("2026-05-08T15:30:00.000Z");
+		vi.spyOn(d, "getTimezoneOffset").mockReturnValue(0);
+		expect(localDateTimeInput(d)).toBe("2026-05-08T15:30");
+	});
+});
+
+describe("localDateInput", () => {
+	it("returns local date (not UTC) near midnight", () => {
+		// 23:30 UTC on May 8 is 01:30 May 9 in UTC+2 local — must serialize as 05-09.
+		const d = new Date("2026-05-08T23:30:00.000Z");
+		vi.spyOn(d, "getTimezoneOffset").mockReturnValue(-120);
+		expect(localDateInput(d)).toBe("2026-05-09");
+	});
+
+	it("matches the UTC date when TZ is UTC", () => {
+		const d = new Date("2026-05-08T23:30:00.000Z");
+		vi.spyOn(d, "getTimezoneOffset").mockReturnValue(0);
+		expect(localDateInput(d)).toBe("2026-05-08");
 	});
 });
