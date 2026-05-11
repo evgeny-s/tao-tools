@@ -132,18 +132,26 @@ export async function fetchStakeData(
 	onStatus({ kind: "info", message: `Connecting to ${rpc}...` });
 	const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
 	try {
-		// Resolve date inputs → blocks using head as anchor (single API connection).
+		// Resolve date inputs → blocks. Anchor on the head block's chain timestamp
+		// (not wall clock): on a fresh local chain wall-clock "now" can be hours
+		// ahead of head, and using Date.now() would push the window past head and
+		// collapse to an empty range.
 		const head = await api.rpc.chain.getHeader();
 		const headBlock = head.number.toNumber();
-		const nowMs = Date.now();
+		const headHash = (await api.rpc.chain.getBlockHash(headBlock)).toHex();
+		const apiHead = await api.at(headHash);
+		const headTsMs = ((await apiHead.query.timestamp.now()) as any).toNumber();
 		const toBlockFromDate = (d: Date) => {
-			const diffBlocks = Math.floor((nowMs - d.getTime()) / 1000 / 12);
-			return Math.max(1, headBlock - diffBlocks);
+			const diffBlocks = Math.floor((headTsMs - d.getTime()) / 1000 / 12);
+			const b = headBlock - diffBlocks;
+			return Math.max(1, Math.min(headBlock, b));
 		};
 		const startBlock = typeof from === "number" ? from : toBlockFromDate(from);
 		const endBlock = typeof to === "number" ? to : toBlockFromDate(to);
 		if (startBlock >= endBlock) {
-			throw new Error(`Invalid range: start ${startBlock} ≥ end ${endBlock}`);
+			throw new Error(
+				`Invalid range: start ${startBlock} ≥ end ${endBlock} (chain head is block ${headBlock}; switch From/To to "block" mode if the chain is too short for the date window)`,
+			);
 		}
 		const TOTAL_SAMPLES = Math.floor((endBlock - startBlock) / BLOCKS_PER_SAMPLE) + 1;
 

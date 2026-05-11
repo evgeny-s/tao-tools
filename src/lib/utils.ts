@@ -62,6 +62,24 @@ export function isValidWsUrl(s: string): boolean {
 	return /^wss?:\/\/[^\s]+$/i.test(s.trim());
 }
 
+// HTML5 `<input type="date">` and `<input type="datetime-local">` round-trip
+// in *local* time. `Date.toISOString()` returns UTC, so naively slicing it
+// loses the user's timezone offset — on UTC+N the round trip silently shifts
+// "now" N hours into the past, which on short test chains can clamp the
+// resolved block range below the head and produce empty windows.
+function toLocalIso(d: Date): string {
+	const tz = d.getTimezoneOffset() * 60_000;
+	return new Date(d.getTime() - tz).toISOString();
+}
+
+export function localDateTimeInput(d: Date): string {
+	return toLocalIso(d).slice(0, 16); // yyyy-MM-ddTHH:mm
+}
+
+export function localDateInput(d: Date): string {
+	return toLocalIso(d).slice(0, 10); // yyyy-MM-dd
+}
+
 // Parses a user-entered block number; throws with a readable message on garbage input.
 export function parseBlockNumber(value: string): number {
 	const n = Number(value);

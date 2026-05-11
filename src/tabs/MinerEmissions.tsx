@@ -3,7 +3,7 @@ import EmissionsTimeline from "../components/EmissionsTimeline";
 import StatusLog from "../components/StatusLog";
 import { type EmissionsResult, alphaAsNumber, fetchEmissionEvents } from "../lib/emissionsFetcher";
 import type { FetchBound, StatusUpdate } from "../lib/fetcher";
-import { isValidWsUrl, parseBlockNumber } from "../lib/utils";
+import { isValidWsUrl, localDateTimeInput, parseBlockNumber } from "../lib/utils";
 
 type RangeMode = "block" | "date";
 
@@ -15,9 +15,9 @@ export default function MinerEmissions({ rpc }: { rpc: string }) {
 	const [fromValue, setFromValue] = useState(() => {
 		const d = new Date();
 		d.setHours(d.getHours() - 5);
-		return d.toISOString().slice(0, 16); // yyyy-MM-ddTHH:mm
+		return localDateTimeInput(d);
 	});
-	const [toValue, setToValue] = useState(() => new Date().toISOString().slice(0, 16));
+	const [toValue, setToValue] = useState(() => localDateTimeInput(new Date()));
 	const [concurrency, setConcurrency] = useState(20);
 
 	const [loading, setLoading] = useState(false);

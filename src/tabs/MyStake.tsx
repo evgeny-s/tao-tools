@@ -8,7 +8,7 @@ import {
 	type StatusUpdate,
 	fetchStakeData,
 } from "../lib/fetcher";
-import { isLikelySs58, isValidWsUrl, parseBlockNumber } from "../lib/utils";
+import { isLikelySs58, isValidWsUrl, localDateInput, parseBlockNumber } from "../lib/utils";
 
 type RangeMode = "block" | "date";
 
@@ -20,9 +20,9 @@ export default function MyStake({ rpc }: { rpc: string }) {
 	const [fromValue, setFromValue] = useState(() => {
 		const d = new Date();
 		d.setDate(d.getDate() - 30);
-		return d.toISOString().slice(0, 10);
+		return localDateInput(d);
 	});
-	const [toValue, setToValue] = useState(() => new Date().toISOString().slice(0, 10));
+	const [toValue, setToValue] = useState(() => localDateInput(new Date()));
 	const [samplesPerDay, setSamplesPerDay] = useState(10);
 	const [concurrency, setConcurrency] = useState(10);
 
