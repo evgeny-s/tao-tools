@@ -11,7 +11,7 @@
 // avoid missing any, we walk every block in the window and pull `system.events`.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { withLimit } from "./utils";
+import { BLOCK_TIME_S, withLimit } from "./utils";
 import type { FetchBound, StatusUpdate } from "./fetcher";
 
 export type EmissionsParams = {
@@ -64,7 +64,6 @@ export type EmissionsResult = {
 	totalAlpha: bigint;
 };
 
-const BLOCK_TIME_S = 12;
 const TAO_BASE = 1_000_000_000n;
 
 function alphaToNumber(v: bigint): number {

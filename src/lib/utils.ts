@@ -7,6 +7,10 @@ export const SHARE_COEF = 1_000_000_000_000_000_000n;
 export const TAO_BASE = 1_000_000_000n;
 // u64::MAX — used as "1.0" scale for child-key proportions.
 export const U64_MAX_N = 18_446_744_073_709_551_615n;
+// Substrate block time for the subtensor chain. Used to convert wall-clock
+// durations to block counts; kept in one place so the two fetchers can't drift.
+export const BLOCK_TIME_S = 12;
+export const BLOCKS_PER_DAY = (24 * 60 * 60) / BLOCK_TIME_S;
 // Legacy Alpha / TotalHotkeyShares stored substrate-fixed U64F64 values, where
 // `bits` is the integer encoding and real_value = bits / 2^64. We keep every
 // share-quantity bigint in this "× 2^64" representation so existing math

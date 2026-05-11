@@ -5,7 +5,15 @@
 // Ported from WIP/TS_SCRIPTS/src/dividends_anomaly.ts for browser use.
 
 import { ApiPromise, WsProvider } from "@polkadot/api";
-import { U64_MAX_N, decodeIdentity, formatTao, mergeShares, withLimit } from "./utils";
+import {
+	BLOCKS_PER_DAY,
+	BLOCK_TIME_S,
+	U64_MAX_N,
+	decodeIdentity,
+	formatTao,
+	mergeShares,
+	withLimit,
+} from "./utils";
 import {
 	computeBalance,
 	computePassiveDividend,
@@ -126,7 +134,6 @@ export async function fetchStakeData(
 	onStatus: (s: StatusUpdate) => void,
 ): Promise<FetchResult> {
 	const { rpc, coldkey, from, to, samplesPerDay, concurrency } = params;
-	const BLOCKS_PER_DAY = 7200;
 	const BLOCKS_PER_SAMPLE = Math.floor(BLOCKS_PER_DAY / samplesPerDay);
 
 	onStatus({ kind: "info", message: `Connecting to ${rpc}...` });
@@ -142,7 +149,7 @@ export async function fetchStakeData(
 		const apiHead = await api.at(headHash);
 		const headTsMs = ((await apiHead.query.timestamp.now()) as any).toNumber();
 		const toBlockFromDate = (d: Date) => {
-			const diffBlocks = Math.floor((headTsMs - d.getTime()) / 1000 / 12);
+			const diffBlocks = Math.floor((headTsMs - d.getTime()) / 1000 / BLOCK_TIME_S);
 			const b = headBlock - diffBlocks;
 			return Math.max(1, Math.min(headBlock, b));
 		};
@@ -221,7 +228,7 @@ export async function fetchStakeData(
 			sampleBlocks[sampleBlocks.length - 1] = endBlock;
 		onStatus({
 			kind: "info",
-			message: `Sampling ${sampleBlocks.length} points (${samplesPerDay}/day), every ${BLOCKS_PER_SAMPLE} blocks (~${((BLOCKS_PER_SAMPLE * 12) / 60).toFixed(0)}min)`,
+			message: `Sampling ${sampleBlocks.length} points (${samplesPerDay}/day), every ${BLOCKS_PER_SAMPLE} blocks (~${((BLOCKS_PER_SAMPLE * BLOCK_TIME_S) / 60).toFixed(0)}min)`,
 		});
 
 		const sampleHashes = await withLimit(sampleBlocks, concurrency, async (bn) =>
