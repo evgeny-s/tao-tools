@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type LockState, expDecay, rollForward } from "./conviction";
+import {
+	type LockContext,
+	type LockState,
+	expDecay,
+	rollForward,
+	simulateUnlockAtHead,
+} from "./conviction";
 
 // τ values from subtensor (DefaultMaturityRate / DefaultUnlockRate):
 //   τ_maturity = 7200 × 90 = 648_000 blocks (~90d @ 12s)
@@ -153,6 +159,63 @@ describe("rollForward — locked mass is invariant", () => {
 		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
 		const farFuture = rollForward(lock, 10 * BLOCKS_PER_DAY * 365, TAU_MATURITY, TAU_UNLOCK);
 		expect(farFuture.lockedRao).toBe(ONE_THOUSAND_ALPHA_RAO);
+	});
+});
+
+describe("simulateUnlockAtHead", () => {
+	const TOTAL_ALPHA = 2_000_000_000_000n; // 2000 α
+	function ctxWith(lock: LockState | null, headBlock = 2 * TAU_MATURITY): LockContext {
+		return {
+			tauMaturity: TAU_MATURITY,
+			tauUnlock: TAU_UNLOCK,
+			blockTimeMs: 12_000,
+			headBlock,
+			lock,
+			totalAlphaOnSubnetRao: TOTAL_ALPHA,
+		};
+	}
+
+	it("returns the input ctx unchanged when there is no lock", () => {
+		const ctx = ctxWith(null);
+		expect(simulateUnlockAtHead(ctx, 100_000_000_000n)).toBe(ctx);
+	});
+
+	it("returns the input ctx unchanged when amount is zero", () => {
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock);
+		expect(simulateUnlockAtHead(ctx, 0n)).toBe(ctx);
+	});
+
+	it("throws when amount exceeds rolled-forward locked_mass", () => {
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock);
+		expect(() => simulateUnlockAtHead(ctx, ONE_THOUSAND_ALPHA_RAO + 1n)).toThrow(/exceeds/);
+	});
+
+	it("moves amount from locked_mass to unlocked_mass and sets lastUpdate to head", () => {
+		// Head is at 2τ_maturity — conviction has matured to ~86.5% of 1000 α
+		// before the unlock. Unlocking 200 should drop locked to 800, push
+		// unlocked to 200, decrement conviction by 200 (saturating), and stamp
+		// lastUpdate = head.
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock);
+		const sim = simulateUnlockAtHead(ctx, 200_000_000_000n);
+		expect(sim.lock).not.toBeNull();
+		expect(sim.lock!.lockedMass).toBe(800_000_000_000n);
+		expect(sim.lock!.unlockedMass).toBe(200_000_000_000n);
+		expect(sim.lock!.lastUpdate).toBe(ctx.headBlock);
+		// conviction at 2τ ≈ 1000·(1−e^-2) ≈ 864.66 α; after -200 ≈ 664.66 α
+		const convAlpha = Number(sim.lock!.convictionBits) / Math.pow(2, 64) / 1e9;
+		expect(convAlpha).toBeCloseTo(1000 * (1 - 1 / (Math.E * Math.E)) - 200, 3);
+	});
+
+	it("saturates conviction at 0 when amount > rolled conviction", () => {
+		// Brand-new lock (head=lastUpdate=0) — conviction is 0; unlocking any
+		// amount must not produce negative conviction.
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock, 0);
+		const sim = simulateUnlockAtHead(ctx, 200_000_000_000n);
+		expect(sim.lock!.convictionBits).toBe(0n);
 	});
 });
 

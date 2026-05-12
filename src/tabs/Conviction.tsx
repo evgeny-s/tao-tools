@@ -20,6 +20,7 @@ import {
 	fetchHistory,
 	loadLockContext,
 	projectForward,
+	simulateUnlockAtHead,
 } from "../lib/conviction";
 import { isLikelySs58, isValidWsUrl, localDateInput, parseBlockNumber } from "../lib/utils";
 
@@ -52,6 +53,9 @@ export default function Conviction({ rpc }: { rpc: string }) {
 	const [projectionDays, setProjectionDays] = useState(180);
 	const [samplesPerDay, setSamplesPerDay] = useState(10);
 	const [concurrency, setConcurrency] = useState(10);
+	// What-if: simulate an unlock_stake(amount) at head before projecting.
+	// "" or 0 = no simulation; >0 = apply simulateUnlockAtHead to the ctx.
+	const [simulatedUnlockAlpha, setSimulatedUnlockAlpha] = useState("");
 
 	const [fromMode, setFromMode] = useState<RangeMode>("date");
 	const [toMode, setToMode] = useState<RangeMode>("date");
@@ -122,11 +126,21 @@ export default function Conviction({ rpc }: { rpc: string }) {
 
 				let samples: LockSample[];
 				if (mode === "projection") {
+					let projCtx = ctx;
+					const simAlpha = parseFloat(simulatedUnlockAlpha);
+					if (!isNaN(simAlpha) && simAlpha > 0) {
+						const amountRao = BigInt(Math.floor(simAlpha * 1e9));
+						projCtx = simulateUnlockAtHead(ctx, amountRao);
+						append({
+							kind: "info",
+							message: `Simulating unlock_stake(${simAlpha} α) at head — projection starts from the post-unlock state.`,
+						});
+					}
 					append({
 						kind: "info",
 						message: `Projecting forward ${projectionDays} days @ ${samplesPerDay} samples/day...`,
 					});
-					samples = projectForward(ctx, projectionDays, samplesPerDay);
+					samples = projectForward(projCtx, projectionDays, samplesPerDay);
 				} else {
 					const startBlock = await resolveBound(api, fromMode, fromValue, ctx);
 					const endBlock = await resolveBound(api, toMode, toValue, ctx);
@@ -232,6 +246,18 @@ export default function Conviction({ rpc }: { rpc: string }) {
 								max={100}
 								value={samplesPerDay}
 								onChange={(e) => setSamplesPerDay(parseInt(e.target.value) || 10)}
+								disabled={loading}
+							/>
+						</div>
+						<div className="row span-2">
+							<label>Simulate unlock at head (α) — blank = no simulation</label>
+							<input
+								type="number"
+								min={0}
+								step="any"
+								placeholder="e.g. 200 — applies unlock_stake math at head before projecting"
+								value={simulatedUnlockAlpha}
+								onChange={(e) => setSimulatedUnlockAlpha(e.target.value)}
 								disabled={loading}
 							/>
 						</div>

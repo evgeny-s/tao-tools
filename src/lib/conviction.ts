@@ -245,6 +245,47 @@ export async function loadLockContext(
 	};
 }
 
+// --- what-if simulation -----------------------------------------------------
+
+// Apply the on-chain `unlock_stake(amount)` effect to a context, returning a
+// new context as if the user had just called it at the head block. Mirrors
+// pallets/subtensor/src/staking/lock.rs:do_unlock_stake step-by-step so a
+// projection starting from the returned context matches what the chain would
+// produce after the same extrinsic.
+//
+// Returns the input context unchanged if there's no lock or amount is zero.
+// Throws if amount exceeds the rolled-forward locked_mass (matches the
+// runtime's UnlockAmountTooHigh check).
+export function simulateUnlockAtHead(ctx: LockContext, amountRao: bigint): LockContext {
+	if (!ctx.lock || amountRao <= 0n) return ctx;
+	const rolled = rollForward(ctx.lock, ctx.headBlock, ctx.tauMaturity, ctx.tauUnlock);
+	if (amountRao > rolled.lockedRao) {
+		throw new Error(
+			`Simulated unlock ${Number(amountRao) / 1e9} α exceeds locked_mass ${Number(rolled.lockedRao) / 1e9} α`,
+		);
+	}
+	const TWO_64 = 1n << 64n;
+	const newLockedMass = rolled.lockedRao - amountRao;
+	const newUnlockedMass = rolled.unlockedRao + amountRao;
+	// Runtime does `conviction.saturating_sub(U64F64::from_num(amount))` —
+	// keep that math in raw bits so a partial unlock loses exactly `amount`
+	// of conviction, not a proportional fraction.
+	const rolledBits = BigInt(Math.floor(rolled.convictionRao * Math.pow(2, 64)));
+	const amountBits = amountRao * TWO_64;
+	const newConvictionBits = rolledBits > amountBits ? rolledBits - amountBits : 0n;
+
+	return {
+		...ctx,
+		lock: {
+			...ctx.lock,
+			lockedMass: newLockedMass,
+			unlockedMass: newUnlockedMass,
+			convictionBits: newConvictionBits,
+			lastUpdate: ctx.headBlock,
+		},
+	};
+}
+
 // --- projection + history ---------------------------------------------------
 
 // Produce an evenly-spaced series starting at `headBlock` and projecting
