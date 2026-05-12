@@ -101,8 +101,19 @@ export default function Conviction({ rpc }: { rpc: string }) {
 			append({ kind: "info", message: `Connecting to ${rpc}...` });
 			const api = await ApiPromise.create({ provider: new WsProvider(rpc) });
 			try {
-				append({ kind: "info", message: "Reading chain constants + current lock state..." });
-				const ctx = await loadLockContext(api, coldkey.trim(), netuid, suppliedHk, concurrency);
+				const ctx = await loadLockContext(
+					api,
+					coldkey.trim(),
+					netuid,
+					suppliedHk,
+					concurrency,
+					(msg, done, total) =>
+						append(
+							done != null && total != null
+								? { kind: "progress", message: msg, done, total }
+								: { kind: "info", message: msg },
+						),
+				);
 
 				append({
 					kind: "info",
