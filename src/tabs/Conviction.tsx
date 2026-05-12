@@ -323,6 +323,10 @@ function ConvictionChart({ payload }: { payload: ResultPayload }) {
 	const { ctx, samples, mode } = payload;
 	const labels = samples.map((s) => s.tDays.toFixed(1));
 
+	// Three lines that live inside [0, locked_mass] go on the left axis;
+	// `available` (typically total stake minus the lock) goes on its own right
+	// axis so a big stake vs. small lock doesn't squash the maturity curves
+	// into a flat line at the bottom.
 	const data = {
 		labels,
 		datasets: [
@@ -334,6 +338,7 @@ function ConvictionChart({ payload }: { payload: ResultPayload }) {
 				tension: 0,
 				pointRadius: 0,
 				borderWidth: 2,
+				yAxisID: "yLeft",
 			},
 			{
 				label: "Unlocked (quarantine)",
@@ -343,6 +348,7 @@ function ConvictionChart({ payload }: { payload: ResultPayload }) {
 				tension: 0.2,
 				pointRadius: 0,
 				borderWidth: 2,
+				yAxisID: "yLeft",
 			},
 			{
 				label: "Conviction",
@@ -352,15 +358,18 @@ function ConvictionChart({ payload }: { payload: ResultPayload }) {
 				tension: 0.2,
 				pointRadius: 0,
 				borderWidth: 2,
+				yAxisID: "yLeft",
 			},
 			{
-				label: "Available",
+				label: "Available (right axis)",
 				data: samples.map((s) => s.available),
 				borderColor: "#a78bfa",
 				backgroundColor: "#a78bfa22",
 				tension: 0.2,
 				pointRadius: 0,
 				borderWidth: 2,
+				borderDash: [4, 3],
+				yAxisID: "yRight",
 			},
 		],
 	};
@@ -385,10 +394,20 @@ function ConvictionChart({ payload }: { payload: ResultPayload }) {
 				ticks: { color: "#aaa", maxTicksLimit: 10 },
 				title: { display: true, text: "days from start", color: "#888" },
 			},
-			y: {
+			yLeft: {
+				type: "linear",
+				position: "left",
 				grid: { color: "#222" },
 				ticks: { color: "#aaa" },
-				title: { display: true, text: "α", color: "#888" },
+				title: { display: true, text: "α (lock-bounded)", color: "#888" },
+				beginAtZero: true,
+			},
+			yRight: {
+				type: "linear",
+				position: "right",
+				grid: { drawOnChartArea: false },
+				ticks: { color: "#a78bfa" },
+				title: { display: true, text: "α (available)", color: "#a78bfa" },
 				beginAtZero: true,
 			},
 		},

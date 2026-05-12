@@ -6,6 +6,7 @@
 // (coldkey, netuid); we read it directly from storage and roll forward in JS.
 
 import type { ApiPromise } from "@polkadot/api";
+import { computeBalance } from "./math";
 import { TAO_BASE, mergeShares, withLimit } from "./utils";
 
 // Stored LockState as it appears on-chain. `conviction` is encoded as U64F64
@@ -161,19 +162,31 @@ function decodeLockState(v: any, hotkey: string): LockState {
 	};
 }
 
-// Subtensor PR #2353 split alpha storage into legacy U64F64 and V2 SafeFloat.
-// Reuses tao-tools' shared merge so old and new chains both work.
-async function readAlphaForHotkey(
+// Returns the user's actual α balance in this (hotkey, coldkey, netuid)
+// position in rao — not raw share bits. Shares × (totalAlpha / totalShares).
+// PR #2353 split alpha storage into legacy U64F64 and V2 SafeFloat; both
+// versions are merged the same way fetcher.ts does it.
+async function readAlphaBalanceForHotkey(
 	apiAt: any,
 	hotkey: string,
 	coldkey: string,
 	netuid: number,
 ): Promise<bigint> {
-	const v1 = await apiAt.query.subtensorModule.alpha(hotkey, coldkey, netuid);
-	const v2 = apiAt.query.subtensorModule.alphaV2
-		? await apiAt.query.subtensorModule.alphaV2(hotkey, coldkey, netuid)
-		: null;
-	return mergeShares(v1, v2);
+	const [aV1, aV2, tsV1, tsV2, taVal] = await Promise.all([
+		apiAt.query.subtensorModule.alpha(hotkey, coldkey, netuid),
+		apiAt.query.subtensorModule.alphaV2
+			? apiAt.query.subtensorModule.alphaV2(hotkey, coldkey, netuid)
+			: Promise.resolve(null),
+		apiAt.query.subtensorModule.totalHotkeyShares(hotkey, netuid),
+		apiAt.query.subtensorModule.totalHotkeySharesV2
+			? apiAt.query.subtensorModule.totalHotkeySharesV2(hotkey, netuid)
+			: Promise.resolve(null),
+		apiAt.query.subtensorModule.totalHotkeyAlpha(hotkey, netuid),
+	]);
+	const shares = mergeShares(aV1, aV2);
+	const totalShares = mergeShares(tsV1, tsV2);
+	const totalAlpha = (taVal as any).toBigInt() as bigint;
+	return computeBalance(shares, totalShares, totalAlpha);
 }
 
 // Σ alpha across all hotkeys the coldkey is staked through on this subnet.
@@ -189,7 +202,7 @@ async function readTotalAlphaOnSubnet(
 		| null;
 	if (!hks || hks.length === 0) return 0n;
 	const alphas = await withLimit(hks, concurrency, (hk) =>
-		readAlphaForHotkey(apiAt, hk, coldkey, netuid),
+		readAlphaBalanceForHotkey(apiAt, hk, coldkey, netuid),
 	);
 	return alphas.reduce((acc, x) => acc + x, 0n);
 }
