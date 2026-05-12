@@ -196,25 +196,34 @@ async function readTotalAlphaOnSubnet(
 	coldkey: string,
 	netuid: number,
 	concurrency: number,
+	onStatus?: StatusFn,
 ): Promise<bigint> {
 	const hks = ((await apiAt.query.subtensorModule.stakingHotkeys(coldkey)) as any).toJSON() as
 		| string[]
 		| null;
 	if (!hks || hks.length === 0) return 0n;
-	const alphas = await withLimit(hks, concurrency, (hk) =>
-		readAlphaBalanceForHotkey(apiAt, hk, coldkey, netuid),
+	onStatus?.(`Summing α across ${hks.length} hotkey(s)...`);
+	const alphas = await withLimit(
+		hks,
+		concurrency,
+		(hk) => readAlphaBalanceForHotkey(apiAt, hk, coldkey, netuid),
+		(done, total) => onStatus?.(`hotkeys`, done, total),
 	);
 	return alphas.reduce((acc, x) => acc + x, 0n);
 }
 
 // One-shot read of everything needed for projection (current state at head).
+// `onStatus` is called between sub-steps so the UI doesn't appear frozen on
+// slow RPCs (chain constants → head hash → lock storage → per-hotkey alpha).
 export async function loadLockContext(
 	api: ApiPromise,
 	coldkey: string,
 	netuid: number,
 	suppliedHotkey: string | null,
 	concurrency: number,
+	onStatus?: StatusFn,
 ): Promise<LockContext> {
+	onStatus?.("Reading chain head + τ constants...");
 	const [headHeader, blockTimeMs, maturityRaw, unlockRaw] = await Promise.all([
 		api.rpc.chain.getHeader(),
 		getBlockTimeMs(api),
@@ -222,18 +231,26 @@ export async function loadLockContext(
 		api.query.subtensorModule.unlockRate(),
 	]);
 	const headBlock = headHeader.number.toNumber();
+	onStatus?.(`Resolving head block hash (#${headBlock})...`);
 	const headHash = (await api.rpc.chain.getBlockHash(headBlock)).toHex();
 	const apiAt = await api.at(headHash);
 
 	// If hotkey was supplied, look it up directly so we can detect mismatches
 	// later; otherwise fall back to prefix-iter (returns whichever single
 	// hotkey is currently locked, if any).
+	onStatus?.("Reading lock storage...");
 	const lock = suppliedHotkey
 		? ((await readLockExact(apiAt, coldkey, netuid, suppliedHotkey)) ??
 			(await readLockEntry(apiAt, coldkey, netuid)))
 		: await readLockEntry(apiAt, coldkey, netuid);
 
-	const totalAlphaOnSubnetRao = await readTotalAlphaOnSubnet(apiAt, coldkey, netuid, concurrency);
+	const totalAlphaOnSubnetRao = await readTotalAlphaOnSubnet(
+		apiAt,
+		coldkey,
+		netuid,
+		concurrency,
+		onStatus,
+	);
 
 	return {
 		tauMaturity: Number((maturityRaw as any).toBigInt?.() ?? (maturityRaw as any).toNumber()),
