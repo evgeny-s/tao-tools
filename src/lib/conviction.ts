@@ -136,13 +136,15 @@ async function readLockEntry(
 
 // Same shape, addressed by the specific hotkey. Used when the caller supplied
 // a hotkey: lets us flag mismatches if the actual lock targets a different one.
+// NMap with three keys is decorated as a positional-args call in polkadot.js
+// (not an array tuple), so pass them separately.
 async function readLockExact(
 	apiAt: any,
 	coldkey: string,
 	netuid: number,
 	hotkey: string,
 ): Promise<LockState | null> {
-	const opt: any = await apiAt.query.subtensorModule.lock([coldkey, netuid, hotkey]);
+	const opt: any = await apiAt.query.subtensorModule.lock(coldkey, netuid, hotkey);
 	if (!opt || opt.isNone) return null;
 	return decodeLockState(opt.unwrap(), hotkey);
 }
