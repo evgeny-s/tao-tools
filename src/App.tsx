@@ -1,10 +1,11 @@
 import { useState } from "react";
 import Logo from "./components/Logo";
 import { DEFAULT_RPC } from "./lib/fetcher";
+import Conviction from "./tabs/Conviction";
 import MinerEmissions from "./tabs/MinerEmissions";
 import MyStake from "./tabs/MyStake";
 
-type Tab = "my-stake" | "miner-emissions";
+type Tab = "my-stake" | "miner-emissions" | "conviction";
 
 export default function App() {
 	const [tab, setTab] = useState<Tab>("my-stake");
@@ -37,9 +38,16 @@ export default function App() {
 				>
 					Miner emissions
 				</button>
+				<button
+					className={`tab ${tab === "conviction" ? "active" : ""}`}
+					onClick={() => setTab("conviction")}
+				>
+					Conviction
+				</button>
 			</div>
 			{tab === "my-stake" && <MyStake rpc={rpc} />}
 			{tab === "miner-emissions" && <MinerEmissions rpc={rpc} />}
+			{tab === "conviction" && <Conviction rpc={rpc} />}
 		</div>
 	);
 }
