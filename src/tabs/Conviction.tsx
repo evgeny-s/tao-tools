@@ -17,10 +17,10 @@ import type { StatusUpdate } from "../lib/fetcher";
 import {
 	type LockContext,
 	type LockSample,
+	type UnlockEvent,
 	fetchHistory,
 	loadLockContext,
 	projectForward,
-	simulateUnlockAtHead,
 } from "../lib/conviction";
 import { isLikelySs58, isValidWsUrl, localDateInput, parseBlockNumber } from "../lib/utils";
 
@@ -53,9 +53,11 @@ export default function Conviction({ rpc }: { rpc: string }) {
 	const [projectionDays, setProjectionDays] = useState(180);
 	const [samplesPerDay, setSamplesPerDay] = useState(10);
 	const [concurrency, setConcurrency] = useState(10);
-	// What-if: simulate an unlock_stake(amount) at head before projecting.
-	// "" or 0 = no simulation; >0 = apply simulateUnlockAtHead to the ctx.
+	// What-if: simulate an unlock_stake(amount) at some block during the
+	// projection window. "" or 0 = no simulation. `simulatedUnlockDay` is days
+	// after head (0 = at head, 30 = 30 days into the future).
 	const [simulatedUnlockAlpha, setSimulatedUnlockAlpha] = useState("");
+	const [simulatedUnlockDay, setSimulatedUnlockDay] = useState("0");
 
 	const [fromMode, setFromMode] = useState<RangeMode>("date");
 	const [toMode, setToMode] = useState<RangeMode>("date");
@@ -126,21 +128,24 @@ export default function Conviction({ rpc }: { rpc: string }) {
 
 				let samples: LockSample[];
 				if (mode === "projection") {
-					let projCtx = ctx;
 					const simAlpha = parseFloat(simulatedUnlockAlpha);
+					const simDay = parseFloat(simulatedUnlockDay);
+					let event: UnlockEvent | undefined;
 					if (!isNaN(simAlpha) && simAlpha > 0) {
 						const amountRao = BigInt(Math.floor(simAlpha * 1e9));
-						projCtx = simulateUnlockAtHead(ctx, amountRao);
+						const dayOffset = isNaN(simDay) || simDay < 0 ? 0 : simDay;
+						const blockOffset = Math.round((dayOffset * 86_400_000) / ctx.blockTimeMs);
+						event = { atBlock: ctx.headBlock + blockOffset, amountRao };
 						append({
 							kind: "info",
-							message: `Simulating unlock_stake(${simAlpha} α) at head — projection starts from the post-unlock state.`,
+							message: `Simulating unlock_stake(${simAlpha} α) on day ${dayOffset.toFixed(2)} (block ${event.atBlock}).`,
 						});
 					}
 					append({
 						kind: "info",
 						message: `Projecting forward ${projectionDays} days @ ${samplesPerDay} samples/day...`,
 					});
-					samples = projectForward(projCtx, projectionDays, samplesPerDay);
+					samples = projectForward(ctx, projectionDays, samplesPerDay, event);
 				} else {
 					const startBlock = await resolveBound(api, fromMode, fromValue, ctx);
 					const endBlock = await resolveBound(api, toMode, toValue, ctx);
@@ -249,16 +254,27 @@ export default function Conviction({ rpc }: { rpc: string }) {
 								disabled={loading}
 							/>
 						</div>
-						<div className="row span-2">
-							<label>Simulate unlock at head (α) — blank = no simulation</label>
+						<div className="row">
+							<label>Simulate unlock — amount (α)</label>
 							<input
 								type="number"
 								min={0}
 								step="any"
-								placeholder="e.g. 200 — applies unlock_stake math at head before projecting"
+								placeholder="e.g. 200 — blank = no simulation"
 								value={simulatedUnlockAlpha}
 								onChange={(e) => setSimulatedUnlockAlpha(e.target.value)}
 								disabled={loading}
+							/>
+						</div>
+						<div className="row">
+							<label>...on day N after head (0 = at head)</label>
+							<input
+								type="number"
+								min={0}
+								step="any"
+								value={simulatedUnlockDay}
+								onChange={(e) => setSimulatedUnlockDay(e.target.value)}
+								disabled={loading || !simulatedUnlockAlpha}
 							/>
 						</div>
 					</>

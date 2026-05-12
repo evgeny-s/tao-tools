@@ -247,21 +247,29 @@ export async function loadLockContext(
 
 // --- what-if simulation -----------------------------------------------------
 
-// Apply the on-chain `unlock_stake(amount)` effect to a context, returning a
-// new context as if the user had just called it at the head block. Mirrors
-// pallets/subtensor/src/staking/lock.rs:do_unlock_stake step-by-step so a
-// projection starting from the returned context matches what the chain would
-// produce after the same extrinsic.
+export type UnlockEvent = {
+	atBlock: number; // block at which the simulated unlock_stake fires
+	amountRao: bigint;
+};
+
+// Apply the on-chain `unlock_stake(amount)` effect at an arbitrary block,
+// returning a context whose `lock` field reflects the post-unlock state with
+// lastUpdate=atBlock. Mirrors pallets/subtensor/src/staking/lock.rs:
+// do_unlock_stake — locked −= amount, unlocked += amount, conviction is
+// rolled forward to `atBlock` then `saturating_sub`-ed by amount.
 //
-// Returns the input context unchanged if there's no lock or amount is zero.
-// Throws if amount exceeds the rolled-forward locked_mass (matches the
-// runtime's UnlockAmountTooHigh check).
-export function simulateUnlockAtHead(ctx: LockContext, amountRao: bigint): LockContext {
+// `atBlock` is clamped to be ≥ ctx.headBlock (we can't simulate in the past).
+export function simulateUnlockAt(
+	ctx: LockContext,
+	amountRao: bigint,
+	atBlock: number,
+): LockContext {
 	if (!ctx.lock || amountRao <= 0n) return ctx;
-	const rolled = rollForward(ctx.lock, ctx.headBlock, ctx.tauMaturity, ctx.tauUnlock);
+	const eventBlock = Math.max(atBlock, ctx.headBlock);
+	const rolled = rollForward(ctx.lock, eventBlock, ctx.tauMaturity, ctx.tauUnlock);
 	if (amountRao > rolled.lockedRao) {
 		throw new Error(
-			`Simulated unlock ${Number(amountRao) / 1e9} α exceeds locked_mass ${Number(rolled.lockedRao) / 1e9} α`,
+			`Simulated unlock ${Number(amountRao) / 1e9} α exceeds locked_mass ${Number(rolled.lockedRao) / 1e9} α at block ${eventBlock}`,
 		);
 	}
 	const TWO_64 = 1n << 64n;
@@ -281,9 +289,14 @@ export function simulateUnlockAtHead(ctx: LockContext, amountRao: bigint): LockC
 			lockedMass: newLockedMass,
 			unlockedMass: newUnlockedMass,
 			convictionBits: newConvictionBits,
-			lastUpdate: ctx.headBlock,
+			lastUpdate: eventBlock,
 		},
 	};
+}
+
+// Backwards-compatible alias — same behaviour, fires at head.
+export function simulateUnlockAtHead(ctx: LockContext, amountRao: bigint): LockContext {
+	return simulateUnlockAt(ctx, amountRao, ctx.headBlock);
 }
 
 // --- projection + history ---------------------------------------------------
@@ -292,20 +305,47 @@ export function simulateUnlockAtHead(ctx: LockContext, amountRao: bigint): LockC
 // forward `days` days, assuming no further user actions. Total alpha is held
 // constant at the head value (it can only change via stake/unstake events,
 // which projection by definition doesn't predict).
+//
+// If `event` is set, samples at block < event.atBlock use the original
+// context; samples at block >= event.atBlock use the post-unlock state
+// (computed by simulateUnlockAt). A duplicate pair of samples is inserted at
+// the event block (pre + post) so the chart renders a vertical step at the
+// unlock instead of a misleading interpolated ramp.
 export function projectForward(
 	ctx: LockContext,
 	days: number,
 	samplesPerDay: number,
+	event?: UnlockEvent,
 ): LockSample[] {
 	const totalSamples = Math.max(2, Math.round(days * samplesPerDay));
 	const totalBlocks = Math.round((days * 24 * 3600 * 1000) / ctx.blockTimeMs);
 	const blockStep = Math.max(1, Math.round(totalBlocks / (totalSamples - 1)));
 
+	const postCtx = event ? simulateUnlockAt(ctx, event.amountRao, event.atBlock) : null;
+	const eventBlock = event && postCtx ? postCtx.lock!.lastUpdate : null;
+
 	const out: LockSample[] = [];
+	let stepInserted = false;
 	for (let i = 0; i < totalSamples; i++) {
 		const block = ctx.headBlock + i * blockStep;
 		const tDays = ((block - ctx.headBlock) * ctx.blockTimeMs) / 86_400_000;
-		out.push(sampleAt(ctx, block, tDays, ctx.totalAlphaOnSubnetRao));
+		// Just before crossing the event boundary, drop in a pair of samples
+		// at the event block — one with the pre-unlock context, one with the
+		// post-unlock context — so the chart shows a clean vertical step.
+		if (
+			eventBlock !== null &&
+			postCtx &&
+			!stepInserted &&
+			block >= eventBlock &&
+			eventBlock >= ctx.headBlock
+		) {
+			const tEvent = ((eventBlock - ctx.headBlock) * ctx.blockTimeMs) / 86_400_000;
+			out.push(sampleAt(ctx, eventBlock, tEvent, ctx.totalAlphaOnSubnetRao));
+			out.push(sampleAt(postCtx, eventBlock, tEvent, ctx.totalAlphaOnSubnetRao));
+			stepInserted = true;
+		}
+		const useCtx = eventBlock !== null && block >= eventBlock ? postCtx! : ctx;
+		out.push(sampleAt(useCtx, block, tDays, ctx.totalAlphaOnSubnetRao));
 	}
 	return out;
 }

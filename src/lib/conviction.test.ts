@@ -3,7 +3,9 @@ import {
 	type LockContext,
 	type LockState,
 	expDecay,
+	projectForward,
 	rollForward,
+	simulateUnlockAt,
 	simulateUnlockAtHead,
 } from "./conviction";
 
@@ -216,6 +218,76 @@ describe("simulateUnlockAtHead", () => {
 		const ctx = ctxWith(lock, 0);
 		const sim = simulateUnlockAtHead(ctx, 200_000_000_000n);
 		expect(sim.lock!.convictionBits).toBe(0n);
+	});
+
+	it("simulateUnlockAt rolls forward to the event block, not head", () => {
+		// Head at lastUpdate=0; simulate unlock at 1τ_maturity later. Without
+		// roll-forward the conviction would still be 0 and saturating_sub
+		// would mask the loss; with roll-forward, conviction at 1τ is ~63.2%
+		// of 1000 ≈ 632 α and after -200 should be ~432 α.
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock, 0);
+		const sim = simulateUnlockAt(ctx, 200_000_000_000n, TAU_MATURITY);
+		expect(sim.lock!.lastUpdate).toBe(TAU_MATURITY);
+		const convAlpha = Number(sim.lock!.convictionBits) / Math.pow(2, 64) / 1e9;
+		expect(convAlpha).toBeCloseTo(1000 * (1 - 1 / Math.E) - 200, 3);
+	});
+
+	it("simulateUnlockAt clamps a past atBlock to head", () => {
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock, 100); // head = block 100
+		const sim = simulateUnlockAt(ctx, 100_000_000_000n, 50); // before head
+		expect(sim.lock!.lastUpdate).toBe(100); // clamped up
+	});
+});
+
+describe("projectForward with mid-window unlock event", () => {
+	function ctxWith(lock: LockState | null, headBlock = 0): LockContext {
+		return {
+			tauMaturity: TAU_MATURITY,
+			tauUnlock: TAU_UNLOCK,
+			blockTimeMs: 12_000,
+			headBlock,
+			lock,
+			totalAlphaOnSubnetRao: 2_000_000_000_000n,
+		};
+	}
+
+	it("emits a step at the event block: locked drops, unlocked jumps", () => {
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock, 0);
+		// Project 180 days at 1 sample/day; unlock 200 α on day 90 (1τ_maturity).
+		const samples = projectForward(ctx, 180, 1, {
+			atBlock: TAU_MATURITY,
+			amountRao: 200_000_000_000n,
+		});
+		// Locate the back-to-back pair at the event block.
+		const evBlock = TAU_MATURITY;
+		let stepIdx = -1;
+		for (let i = 1; i < samples.length; i++) {
+			if (samples[i - 1].block === evBlock && samples[i].block === evBlock) {
+				stepIdx = i;
+				break;
+			}
+		}
+		expect(stepIdx).toBeGreaterThan(0);
+		// Pre sample: still 1000 α locked, 0 unlocked.
+		expect(samples[stepIdx - 1].locked).toBeCloseTo(1000, 3);
+		expect(samples[stepIdx - 1].unlocked).toBeCloseTo(0, 3);
+		// Post sample: 800 α locked, 200 unlocked.
+		expect(samples[stepIdx].locked).toBeCloseTo(800, 3);
+		expect(samples[stepIdx].unlocked).toBeCloseTo(200, 3);
+	});
+
+	it("samples before the event use the original lock", () => {
+		const lock = lockOf({ lockedRao: ONE_THOUSAND_ALPHA_RAO, lastUpdate: 0 });
+		const ctx = ctxWith(lock, 0);
+		const samples = projectForward(ctx, 180, 1, {
+			atBlock: TAU_MATURITY,
+			amountRao: 200_000_000_000n,
+		});
+		// First sample is at head (block 0) — pre-unlock locked is 1000 α.
+		expect(samples[0].locked).toBeCloseTo(1000, 3);
 	});
 });
 
