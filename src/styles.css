@@ -297,3 +297,48 @@ h3 {
 .summary .row > div .v {
 	color: var(--fg);
 }
+
+/* Block weight tab — per-call / heavy-extrinsic tables. */
+.bw-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-family: ui-monospace, monospace;
+	font-size: 12px;
+	margin-bottom: 20px;
+}
+.bw-table th {
+	text-align: left;
+	color: var(--muted);
+	font-weight: 500;
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--border);
+}
+.bw-table td {
+	padding: 5px 10px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+	color: var(--fg);
+	white-space: nowrap;
+}
+.bw-table td.num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.bw-table td a {
+	color: var(--accent);
+	text-decoration: none;
+}
+.bw-table td a:hover {
+	text-decoration: underline;
+}
+.bw-table td.bar-cell {
+	width: 30%;
+	padding-right: 0;
+}
+.bw-table .bar {
+	display: inline-block;
+	height: 8px;
+	min-width: 1px;
+	border-radius: 2px;
+	background: var(--accent);
+	vertical-align: middle;
+}

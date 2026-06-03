@@ -1,11 +1,12 @@
 import { useState } from "react";
 import Logo from "./components/Logo";
 import { DEFAULT_RPC } from "./lib/fetcher";
+import BlockWeight from "./tabs/BlockWeight";
 import Conviction from "./tabs/Conviction";
 import MinerEmissions from "./tabs/MinerEmissions";
 import MyStake from "./tabs/MyStake";
 
-type Tab = "my-stake" | "miner-emissions" | "conviction";
+type Tab = "my-stake" | "miner-emissions" | "conviction" | "block-weight";
 
 export default function App() {
 	const [tab, setTab] = useState<Tab>("my-stake");
@@ -44,10 +45,17 @@ export default function App() {
 				>
 					Conviction
 				</button>
+				<button
+					className={`tab ${tab === "block-weight" ? "active" : ""}`}
+					onClick={() => setTab("block-weight")}
+				>
+					Block weight
+				</button>
 			</div>
 			{tab === "my-stake" && <MyStake rpc={rpc} />}
 			{tab === "miner-emissions" && <MinerEmissions rpc={rpc} />}
 			{tab === "conviction" && <Conviction rpc={rpc} />}
+			{tab === "block-weight" && <BlockWeight rpc={rpc} />}
 		</div>
 	);
 }
