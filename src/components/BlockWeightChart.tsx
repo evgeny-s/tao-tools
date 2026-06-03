@@ -169,7 +169,7 @@ export default function BlockWeightChart({ result }: { result: BlockWeightResult
 
 					<h2>Heaviest individual extrinsics</h2>
 					<div className="note">Single extrinsics that consumed the most in one block.</div>
-					<HeavyTable heaviest={heaviest} />
+					<HeavyTable heaviest={heaviest} rpc={meta.rpc} />
 				</>
 			)}
 		</div>
@@ -211,9 +211,12 @@ function CallTable({ result }: { result: BlockWeightResult }) {
 	);
 }
 
-function HeavyTable({ heaviest }: { heaviest: BlockWeightResult["heaviest"] }) {
+function HeavyTable({ heaviest, rpc }: { heaviest: BlockWeightResult["heaviest"]; rpc: string }) {
+	// Link to the same chain that was scanned, not a hardcoded endpoint —
+	// mirrors the builder in fetcher.ts so non-finney RPCs resolve correctly.
+	const encodedRpc = encodeURIComponent(rpc);
 	const explorer = (block: number) =>
-		`https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fentrypoint-finney.opentensor.ai#/explorer/query/${block}`;
+		`https://polkadot.js.org/apps/?rpc=${encodedRpc}#/explorer/query/${block}`;
 	return (
 		<table className="bw-table">
 			<thead>
