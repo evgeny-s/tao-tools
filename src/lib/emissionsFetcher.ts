@@ -7,6 +7,13 @@
 //     emissions: Vec<AlphaBalance>,   // index = UID, value = u64 raw alpha
 //   }
 //
+// NetUidStorageIndex is NOT a plain netuid — it encodes the mechanism too
+// (pallets/subtensor/src/subnets/mechanism.rs):
+//   storage_index = netuid + mechId * GLOBAL_MAX_SUBNET_COUNT (4096)
+// so e.g. 4209 is subnet 113, mechanism 1. We decode with `index % 4096` and
+// aggregate all mechanisms of a subnet together (UIDs are per-subnet, shared
+// across mechanisms).
+//
 // The event fires once per epoch per subnet (tempo, typically 360 blocks). To
 // avoid missing any, we walk every block in the window and pull `system.events`.
 
@@ -65,6 +72,9 @@ export type EmissionsResult = {
 };
 
 const TAO_BASE = 1_000_000_000n;
+
+// Mirrors GLOBAL_MAX_SUBNET_COUNT in subtensor's mechanism.rs.
+const GLOBAL_MAX_SUBNET_COUNT = 4096;
 
 function alphaToNumber(v: bigint): number {
 	return Number(v) / Number(TAO_BASE);
@@ -155,8 +165,10 @@ export async function fetchEmissionEvents(
 						netuidRaw = (data as any).netuid;
 						emissionsRaw = (data as any).emissions;
 					}
-					const netuid = Number(netuidRaw);
-					if (!Number.isFinite(netuid)) continue;
+					const netuidIndex = Number(netuidRaw);
+					if (!Number.isFinite(netuidIndex)) continue;
+					// Decode NetUidStorageIndex → true netuid (drop the mechanism part).
+					const netuid = netuidIndex % GLOBAL_MAX_SUBNET_COUNT;
 					if (netuidFilter !== null && netuid !== netuidFilter) continue;
 					const emissions = decodeEmissionsVec(emissionsRaw);
 					rawEvents.push({ block: bn, netuid, emissions });
